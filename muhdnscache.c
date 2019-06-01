@@ -8,6 +8,9 @@
 #pragma comment(lib, "dnsapi.lib")
 #endif
 
+#ifdef __cplusplus
+extern "C"
+#endif
 int WINAPI DnsGetCacheDataTable(PDNS_RECORD*);
 
 static int countEntries(PDNS_RECORD ptr)
