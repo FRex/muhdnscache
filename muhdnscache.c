@@ -1,52 +1,32 @@
 #include <Windows.h>
+#include <Windns.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <wchar.h>
 
-struct DnsCacheEntry
-{
-    struct DnsCacheEntry * next;
-    wchar_t * name;
-    unsigned short type;
-    unsigned short len;
-    unsigned long flags;
-};
+#ifdef _MSC_VER
+#pragma comment(lib, "dnsapi.lib")
+#endif
 
-typedef int(WINAPI*DnsGetCacheDataTableFunction)(struct DnsCacheEntry*);
+int WINAPI DnsGetCacheDataTable(PDNS_RECORD*);
 
-static int getCacheEntries(struct DnsCacheEntry * ptr)
-{
-    HINSTANCE dnsapidll;
-    DnsGetCacheDataTableFunction DnsGetCacheDataTable;
-
-    dnsapidll = LoadLibraryA("dnsapi.dll");
-    if(!dnsapidll)
-        return 0;
-
-    DnsGetCacheDataTable = (DnsGetCacheDataTableFunction)GetProcAddress(dnsapidll, "DnsGetCacheDataTable");
-    if(!DnsGetCacheDataTable)
-        return 0;
-
-    return DnsGetCacheDataTable(ptr);
-}
-
-static int countEntries(struct DnsCacheEntry * ptr)
+static int countEntries(PDNS_RECORD ptr)
 {
     int ret = 0;
     while(ptr)
     {
         ++ret;
-        ptr = ptr->next;
+        ptr = ptr->pNext;
     }
     return ret;
 }
 
-static void copyEntries(struct DnsCacheEntry * ptr, const wchar_t ** names)
+static void copyEntries(PDNS_RECORD ptr, const wchar_t ** names)
 {
     while(ptr)
     {
-        *names++ = ptr->name;
-        ptr = ptr->next;
+        *names++ = (const wchar_t*)ptr->pName;
+        ptr = ptr->pNext;
     }
 }
 
@@ -66,14 +46,36 @@ static int samestr(const wchar_t * a, const wchar_t * b)
     return 0 == wcscmp(a, b);
 }
 
+static void printA(const wchar_t * domain, PDNS_RECORD p)
+{
+    while(p)
+    {
+        if(DNS_TYPE_A == p->wType)
+        {
+            const int a = (int)((p->Data.A.IpAddress >> 0x00) & 0xff);
+            const int b = (int)((p->Data.A.IpAddress >> 0x08) & 0xff);
+            const int c = (int)((p->Data.A.IpAddress >> 0x10) & 0xff);
+            const int d = (int)((p->Data.A.IpAddress >> 0x18) & 0xff);
+            wprintf(L"%ls %u %d.%d.%d.%d\n", domain, p->dwTtl, a, b, c, d);
+        }
+        p = p->pNext;
+    }
+}
+
 static void printunique(const wchar_t ** strs)
 {
     const wchar_t * last = NULL;
     while(*strs)
     {
         if(!samestr(*strs, last))
-            printf("%ls\n", *strs);
-
+        {
+            PDNS_RECORD r = NULL;
+            if(DNS_RCODE_NOERROR == DnsQuery_W(*strs, DNS_TYPE_A, DNS_QUERY_NO_WIRE_QUERY, NULL, &r, NULL))
+            {
+                printA(*strs, r);
+                DnsRecordListFree(r, DnsFreeRecordList);
+            }
+        }
         last = *strs;
         ++strs;
     }
@@ -81,22 +83,25 @@ static void printunique(const wchar_t ** strs)
 
 int main(int argc, char ** argv)
 {
-    struct DnsCacheEntry entry;
+    PDNS_RECORD entries = NULL;
     const wchar_t ** names = NULL;
     int ecount = 0;
 
-    if(!getCacheEntries(&entry))
+    if(!DnsGetCacheDataTable(&entries))
         return 1;
 
-    ecount = countEntries(entry.next);
+    ecount = countEntries(entries);
     names = (const wchar_t**)calloc(ecount + 1, sizeof(wchar_t*));
     if(!names)
+    {
+        DnsRecordListFree(entries, DnsFreeRecordList);
         return 2;
+    }
 
-    copyEntries(entry.next, names);
+    copyEntries(entries, names);
     qsort(names, ecount, sizeof(wchar_t*), &myqwcmp);
     printunique(names);
     free(names);
-    /* free dns cache entries? */
+    DnsRecordListFree(entries, DnsFreeRecordList);
     return 0;
 }
