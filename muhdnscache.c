@@ -73,7 +73,12 @@ static void printunique(const wchar_t ** strs)
         if(!samestr(*strs, last))
         {
             PDNS_RECORD r = NULL;
-            if(DNS_RCODE_NOERROR == DnsQuery_W(*strs, DNS_TYPE_A, DNS_QUERY_NO_WIRE_QUERY, NULL, &r, NULL))
+
+            /* 0x8010 was dug out of ipconfig disasm, it seems to be binary OR
+            of DNS_QUERY_NO_WIRE_QUERY and some undocumented one (0x00008000 and
+            few others are missing from DNS_QUERY* defines, there are other
+            defines of that value but they seem unrelated) */
+            if(DNS_RCODE_NOERROR == DnsQuery_W(*strs, DNS_TYPE_A, 0x8010, NULL, &r, NULL))
             {
                 printA(*strs, r);
                 DnsRecordListFree(r, DnsFreeRecordList);
